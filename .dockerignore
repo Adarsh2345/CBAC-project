@@ -1,0 +1,10 @@
+cbac.db
+*.db
+.env
+__pycache__
+**/__pycache__
+*.pyc
+*.pyo
+tests/
+simulator.py
+*.log

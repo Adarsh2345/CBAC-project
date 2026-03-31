@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full bg-gray-950">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CBAC Gateway &mdash; Admin Dashboard</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <style>
+    @keyframes ping-slow { 0%,100%{opacity:1} 50%{opacity:.3} }
+    .ping-slow { animation: ping-slow 2s ease-in-out infinite; }
+    @keyframes fadeIn { from{opacity:0;transform:translateY(-4px)} to{opacity:1;transform:none} }
+    .row-enter { animation: fadeIn 0.3s ease-out; }
+    .scroll-dark::-webkit-scrollbar { width:6px; height:6px; }
+    .scroll-dark::-webkit-scrollbar-track { background:#111827; }
+    .scroll-dark::-webkit-scrollbar-thumb { background:#374151; border-radius:3px; }
+    .tab-active   { border-bottom: 2px solid #6366f1; color: #e0e7ff; }
+    .tab-inactive { border-bottom: 2px solid transparent; color: #6b7280; }
+    /* Toggle switch */
+    .toggle-cb:checked + .toggle-label { background-color: #4f46e5; }
+    .toggle-label { transition: background-color 0.2s; }
+    .toggle-label::after { transition: transform 0.2s; }
+    .toggle-cb:checked + .toggle-label::after { transform: translateX(1.25rem); }
+  </style>
+</head>
+
+<body class="h-full text-gray-100 font-mono antialiased">
+
+  <!-- ── Top nav ──────────────────────────────────────────────────────── -->
+  <header class="sticky top-0 z-10 flex items-center justify-between
+                 border-b border-gray-800 bg-gray-950/90 backdrop-blur px-6 py-3">
+    <div class="flex items-center gap-3">
+      <svg class="h-6 w-6 text-indigo-400" fill="none" viewBox="0 0 24 24"
+           stroke="currentColor" stroke-width="1.8">
+        <path stroke-linecap="round" stroke-linejoin="round"
+              d="M12 2l7 4v5c0 5-3.5 9.74-7 11C8.5 20.74 5 16 5 11V6l7-4z"/>
+      </svg>
+      <span class="text-lg font-semibold tracking-tight text-white">
+        Zero-Trust Adaptive API Gateway
+      </span>
+      <span class="rounded bg-indigo-900/60 px-2 py-0.5 text-xs text-indigo-300
+                   border border-indigo-700">CBAC</span>
+    </div>
+    <div class="flex items-center gap-4">
+      <span id="user-chip"
+            class="hidden text-xs text-gray-400 border border-gray-700 rounded-full px-3 py-1">
+      </span>
+      <div class="flex items-center gap-2 text-xs text-gray-400">
+        <span class="h-2 w-2 rounded-full bg-emerald-400 ping-slow"></span>
+        <span id="status-text">Connecting...</span>
+      </div>
+      <button onclick="logout()"
+              class="text-xs text-gray-500 hover:text-red-400 transition">Sign out</button>
+    </div>
+  </header>
+
+  <!-- ── Main ─────────────────────────────────────────────────────────── -->
+  <main class="mx-auto max-w-7xl px-4 py-8 space-y-6">
+
+    <!-- Stats -->
+    <div class="grid grid-cols-2 gap-4 sm:grid-cols-4">
+      <div class="bg-gray-900 border border-gray-800 rounded-xl p-4 text-center">
+        <p class="text-2xl font-bold text-white"   id="count-total">-</p>
+        <p class="mt-1 text-xs text-gray-400 uppercase tracking-widest">Total</p>
+      </div>
+      <div class="bg-gray-900 border border-gray-800 rounded-xl p-4 text-center">
+        <p class="text-2xl font-bold text-emerald-400" id="count-allow">-</p>
+        <p class="mt-1 text-xs text-gray-400 uppercase tracking-widest">Allowed</p>
+      </div>
+      <div class="bg-gray-900 border border-gray-800 rounded-xl p-4 text-center">
+        <p class="text-2xl font-bold text-red-400"  id="count-block">-</p>
+        <p class="mt-1 text-xs text-gray-400 uppercase tracking-widest">Blocked</p>
+      </div>
+      <div class="bg-gray-900 border border-gray-800 rounded-xl p-4 text-center">
+        <p class="text-2xl font-bold text-amber-400" id="count-challenge">-</p>
+        <p class="mt-1 text-xs text-gray-400 uppercase tracking-widest">Challenged</p>
+      </div>
+    </div>
+
+    <!-- Threat Timeline Chart -->
+    <div class="bg-gray-900 border border-gray-800 rounded-xl p-5">
+      <p class="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-4">
+        Threat Timeline (last 60 events)
+      </p>
+      <canvas id="timeline-chart" height="90"></canvas>
+    </div>
+
+    <!-- Tabs -->
+    <div class="border-b border-gray-800 flex gap-6 px-1">
+      <button id="tab-logs"     onclick="switchTab('logs')"
+              class="pb-2 text-sm font-medium transition tab-active">
+        Access Audit Log
+      </button>
+      <button id="tab-policies" onclick="switchTab('policies')"
+              class="pb-2 text-sm font-medium transition tab-inactive">
+        Policy Controls
+      </button>
+    </div>
+
+    <!-- ── Tab: Audit Log ─────────────────────────────────────────────── -->
+    <div id="panel-logs">
+      <div class="rounded-xl border border-gray-800 bg-gray-900 overflow-hidden">
+        <div class="flex items-center justify-between border-b border-gray-800 px-5 py-3">
+          <h2 class="text-sm font-semibold text-gray-200 uppercase tracking-widest">
+            Access Audit Log
+          </h2>
+          <span class="text-xs text-gray-500">Auto-refreshes every 2s</span>
+        </div>
+        <div class="overflow-x-auto scroll-dark">
+          <table class="min-w-full text-xs">
+            <thead>
+              <tr class="border-b border-gray-800 text-gray-400 uppercase tracking-widest">
+                <th class="px-4 py-3 text-left whitespace-nowrap">ID</th>
+                <th class="px-4 py-3 text-left whitespace-nowrap">Timestamp</th>
+                <th class="px-4 py-3 text-left whitespace-nowrap">User</th>
+                <th class="px-4 py-3 text-left whitespace-nowrap">IP Address</th>
+                <th class="px-4 py-3 text-left whitespace-nowrap">Location</th>
+                <th class="px-4 py-3 text-left whitespace-nowrap">Action</th>
+                <th class="px-4 py-3 text-left whitespace-nowrap">Policy</th>
+                <th class="px-4 py-3 text-left">Reason</th>
+              </tr>
+            </thead>
+            <tbody id="log-body">
+              <tr><td colspan="8" class="px-4 py-10 text-center text-gray-600">
+                Waiting for data...
+              </td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Tab: Policy Controls ───────────────────────────────────────── -->
+    <div id="panel-policies" class="hidden space-y-4">
+      <p class="text-xs text-gray-500">
+        Toggle rules on or off at runtime. Changes take effect on the next
+        inbound request — no server restart required.
+      </p>
+      <div id="policy-cards" class="grid gap-4 sm:grid-cols-3">
+        <div class="px-4 py-10 text-center text-gray-600 col-span-3">
+          Loading policies...
+        </div>
+      </div>
+    </div>
+
+  </main>
+
+  <script>
+    // ── Auth guard ───────────────────────────────────────────────────────
+    const TOKEN    = localStorage.getItem('cbac_token');
+    const USERNAME = localStorage.getItem('cbac_username') || '';
+    if (!TOKEN) { window.location.href = '/'; }
+
+    const userChip = document.getElementById('user-chip');
+    userChip.textContent = USERNAME;
+    userChip.classList.remove('hidden');
+
+    function authHeaders() {
+      return { 'Authorization': 'Bearer ' + TOKEN };
+    }
+
+    function logout() {
+      localStorage.removeItem('cbac_token');
+      localStorage.removeItem('cbac_username');
+      localStorage.removeItem('cbac_user_id');
+      window.location.href = '/';
+    }
+
+    // ── Tab switching ────────────────────────────────────────────────────
+    function switchTab(name) {
+      document.getElementById('panel-logs').classList.toggle('hidden',      name !== 'logs');
+      document.getElementById('panel-policies').classList.toggle('hidden',  name !== 'policies');
+      document.getElementById('tab-logs').className     = 'pb-2 text-sm font-medium transition ' +
+        (name === 'logs'     ? 'tab-active' : 'tab-inactive');
+      document.getElementById('tab-policies').className = 'pb-2 text-sm font-medium transition ' +
+        (name === 'policies' ? 'tab-active' : 'tab-inactive');
+      if (name === 'policies') fetchPolicies();
+    }
+
+    // ── Badge helpers ────────────────────────────────────────────────────
+    const BADGE = {
+      ALLOW:     'bg-emerald-900/60 text-emerald-300 border border-emerald-700',
+      BLOCK:     'bg-red-900/60     text-red-300     border border-red-700',
+      CHALLENGE: 'bg-amber-900/60   text-amber-300   border border-amber-700',
+    };
+    const RULE_BADGE = {
+      TIME:     'bg-blue-900/50 text-blue-300 border border-blue-700',
+      VELOCITY: 'bg-purple-900/50 text-purple-300 border border-purple-700',
+      DEVICE:   'bg-pink-900/50 text-pink-300 border border-pink-700',
+    };
+
+    function badge(action) {
+      const cls = BADGE[action] ?? 'bg-gray-800 text-gray-300 border border-gray-600';
+      return `<span class="rounded px-2 py-0.5 font-semibold text-xs ${cls}">${action}</span>`;
+    }
+
+    function esc(s) {
+      if (s == null) return '<span class="text-gray-600">-</span>';
+      return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;')
+                      .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    }
+
+    // ── Chart setup ──────────────────────────────────────────────────────
+    const chartCtx = document.getElementById('timeline-chart').getContext('2d');
+    const CHART_POINTS = 30;
+    const emptyLabels = Array.from({length: CHART_POINTS}, (_, i) => `-${(CHART_POINTS-i)*2}s`);
+
+    const timelineChart = new Chart(chartCtx, {
+      type: 'line',
+      data: {
+        labels: emptyLabels,
+        datasets: [
+          { label: 'ALLOW',     data: Array(CHART_POINTS).fill(0),
+            borderColor: '#34d399', backgroundColor: 'rgba(52,211,153,.08)',
+            tension: 0.4, fill: true, pointRadius: 2 },
+          { label: 'BLOCK',     data: Array(CHART_POINTS).fill(0),
+            borderColor: '#f87171', backgroundColor: 'rgba(248,113,113,.08)',
+            tension: 0.4, fill: true, pointRadius: 2 },
+          { label: 'CHALLENGE', data: Array(CHART_POINTS).fill(0),
+            borderColor: '#fbbf24', backgroundColor: 'rgba(251,191,36,.08)',
+            tension: 0.4, fill: true, pointRadius: 2 },
+        ],
+      },
+      options: {
+        responsive: true,
+        animation: false,
+        plugins: {
+          legend: { labels: { color: '#9ca3af', boxWidth: 12, font: { family: 'monospace' } } },
+        },
+        scales: {
+          x: { ticks: { color: '#4b5563', font: { family: 'monospace', size: 10 } },
+               grid:  { color: '#1f2937' } },
+          y: { beginAtZero: true, ticks: { color: '#4b5563', precision: 0,
+               font: { family: 'monospace', size: 10 } },
+               grid: { color: '#1f2937' } },
+        },
+      },
+    });
+
+    function updateChart(rows) {
+      // Bucket the last CHART_POINTS*2 seconds into 2-second windows
+      const now  = Date.now() / 1000;
+      const bins = Array.from({length: CHART_POINTS}, () => ({ALLOW:0, BLOCK:0, CHALLENGE:0}));
+
+      rows.forEach(r => {
+        const ts  = new Date(r.timestamp.replace(' ', 'T') + 'Z').getTime() / 1000;
+        const age = now - ts;
+        const idx = Math.floor(age / 2);
+        if (idx >= 0 && idx < CHART_POINTS) {
+          const bin = bins[CHART_POINTS - 1 - idx];
+          if (bin && r.action in bin) bin[r.action]++;
+        }
+      });
+
+      timelineChart.data.datasets[0].data = bins.map(b => b.ALLOW);
+      timelineChart.data.datasets[1].data = bins.map(b => b.BLOCK);
+      timelineChart.data.datasets[2].data = bins.map(b => b.CHALLENGE);
+      timelineChart.update('none');
+    }
+
+    // ── Audit log ────────────────────────────────────────────────────────
+    let highestSeenId = 0;
+
+    function updateStats(rows) {
+      document.getElementById('count-total').textContent     = rows.length;
+      document.getElementById('count-allow').textContent     = rows.filter(r=>r.action==='ALLOW').length;
+      document.getElementById('count-block').textContent     = rows.filter(r=>r.action==='BLOCK').length;
+      document.getElementById('count-challenge').textContent = rows.filter(r=>r.action==='CHALLENGE').length;
+    }
+
+    function renderRows(rows) {
+      const tbody  = document.getElementById('log-body');
+      const newIds = new Set(rows.filter(r => r.id > highestSeenId).map(r => r.id));
+      if (newIds.size) highestSeenId = Math.max(...newIds);
+
+      tbody.innerHTML = rows.map(row => `
+        <tr class="border-b border-gray-800/60 hover:bg-gray-800/40 transition-colors
+                   ${newIds.has(row.id) ? 'row-enter' : ''}">
+          <td class="px-4 py-3 text-gray-500">${row.id}</td>
+          <td class="px-4 py-3 text-gray-400 whitespace-nowrap">
+            ${row.timestamp ? row.timestamp.split('.')[0] : '-'}
+          </td>
+          <td class="px-4 py-3 text-indigo-300 whitespace-nowrap">
+            ${row.username
+              ? `<span class="font-semibold">${esc(row.username)}</span>
+                 <span class="text-gray-600 text-xs ml-1">#${row.user_id}</span>`
+              : '<span class="text-gray-600">anonymous</span>'}
+          </td>
+          <td class="px-4 py-3 text-gray-300 whitespace-nowrap font-mono text-xs">${esc(row.ip_address)}</td>
+          <td class="px-4 py-3 whitespace-nowrap">
+            <div class="text-gray-200 text-xs font-medium">${esc(row.city) !== '<span class="text-gray-600">-</span>' ? esc(row.city) : ''}</div>
+            <div class="text-gray-500 text-xs">${esc(row.country)}</div>
+          </td>
+          <td class="px-4 py-3 whitespace-nowrap">${badge(row.action)}</td>
+          <td class="px-4 py-3 text-gray-400 whitespace-nowrap">
+            ${row.policy_name
+              ? `<code class="text-xs text-purple-300">${esc(row.policy_name)}</code>`
+              : '<span class="text-gray-600">-</span>'}
+          </td>
+          <td class="px-4 py-3 text-gray-400 max-w-xs truncate" title="${esc(row.reason)}">
+            ${esc(row.reason)}
+          </td>
+        </tr>`).join('') || `<tr><td colspan="8" class="px-4 py-10 text-center text-gray-600">
+          No log entries yet.</td></tr>`;
+    }
+
+    async function fetchLogs() {
+      try {
+        const resp = await fetch('/api/logs', { headers: authHeaders() });
+        if (resp.status === 401) { logout(); return; }
+        if (!resp.ok) throw new Error('HTTP ' + resp.status);
+        const rows = await resp.json();
+        updateStats(rows);
+        renderRows(rows);
+        updateChart(rows);
+        document.getElementById('status-text').textContent = 'Live';
+      } catch (e) {
+        document.getElementById('status-text').textContent = 'Error - retrying';
+      }
+    }
+
+    // ── Policy control panel ─────────────────────────────────────────────
+    async function fetchPolicies() {
+      try {
+        const resp = await fetch('/admin/policies', { headers: authHeaders() });
+        if (!resp.ok) throw new Error();
+        const policies = await resp.json();
+        renderPolicies(policies);
+      } catch {
+        document.getElementById('policy-cards').innerHTML =
+          '<p class="text-red-400 col-span-3 text-sm">Failed to load policies.</p>';
+      }
+    }
+
+    function renderPolicies(policies) {
+      const container = document.getElementById('policy-cards');
+      container.innerHTML = policies.map(p => {
+        const rbCls = RULE_BADGE[p.rule_type] ?? 'bg-gray-800 text-gray-400 border border-gray-600';
+        return `
+          <div class="bg-gray-900 border border-gray-800 rounded-xl p-5 space-y-3
+                      transition ${p.is_enabled ? '' : 'opacity-50'}">
+            <div class="flex items-start justify-between gap-2">
+              <div class="space-y-1">
+                <p class="text-sm font-semibold text-white">${esc(p.policy_name)}</p>
+                <span class="inline-block rounded px-2 py-0.5 text-xs ${rbCls}">
+                  ${p.rule_type}
+                </span>
+              </div>
+              <!-- Toggle switch -->
+              <label class="relative inline-flex items-center cursor-pointer flex-shrink-0 mt-0.5">
+                <input type="checkbox" class="sr-only toggle-cb"
+                       id="toggle-${p.id}"
+                       ${p.is_enabled ? 'checked' : ''}
+                       onchange="togglePolicy(${p.id}, this.checked)">
+                <div class="toggle-label w-10 h-5 bg-gray-700 rounded-full relative
+                            after:content-[''] after:absolute after:top-0.5 after:left-0.5
+                            after:bg-white after:rounded-full after:h-4 after:w-4"></div>
+              </label>
+            </div>
+            <p class="text-xs text-gray-400 leading-relaxed">${esc(p.description)}</p>
+            <p class="text-xs text-gray-600">
+              Priority <span class="text-gray-400">${p.priority}</span>
+              &nbsp;&bull;&nbsp;
+              Action <span class="text-${p.action==='BLOCK'?'red':p.action==='MFA_CHALLENGE'?'amber':'emerald'}-400">
+                ${p.action}
+              </span>
+            </p>
+          </div>`;
+      }).join('');
+    }
+
+    async function togglePolicy(id, enabled) {
+      try {
+        const resp = await fetch(`/admin/policies/${id}`, {
+          method:  'PATCH',
+          headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+          body:    JSON.stringify({ is_enabled: enabled }),
+        });
+        if (!resp.ok) throw new Error();
+        // Re-fetch to confirm server state
+        await fetchPolicies();
+      } catch {
+        alert('Failed to update policy. Try again.');
+        await fetchPolicies(); // reset toggle to server state
+      }
+    }
+
+    // ── Boot ─────────────────────────────────────────────────────────────
+    fetchLogs();
+    setInterval(fetchLogs, 2000);
+  </script>
+
+</body>
+</html>
