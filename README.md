@@ -278,8 +278,4 @@ The gateway is intentionally designed for extension at clean seams:
 | HTTP Client (simulator) | requests |
 | Tests | pytest |
 
----
 
-## License
-
-MIT
